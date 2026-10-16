@@ -77,9 +77,11 @@ pub fn build(b: *std.Build) !void {
     });
 
     // raylib's build script bails out before creating its artifact when one of
-    // its lazy dependencies hasn't been fetched yet. Propagate so the build
-    // runner fetches them and reruns us.
-    if (b.graph.needed_lazy_dependencies.count() != 0) return error.LazyDependencyNeeded;
+    // its lazy dependencies hasn't been fetched yet. Exit configuration so the
+    // build runner fetches them and reruns us. Returning
+    // error.LazyDependencyNeeded isn't enough: when we are a dependency, Zig
+    // swallows it and the parent panics looking up our modules (#364).
+    if (b.graph.needed_lazy_dependencies.count() != 0) b.serializeConfigurationExiting();
 
     const raylib_artifact = raylib_dep.artifact("raylib");
 
