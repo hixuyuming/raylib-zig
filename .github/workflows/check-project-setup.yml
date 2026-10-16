@@ -1,0 +1,60 @@
+name: Check project setup
+
+on:
+  push:
+    branches:
+      - devel
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check-project-setup:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        target: [native, emscripten]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Set up ubuntu packages
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libglfw3 libglfw3-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxext-dev libxfixes-dev libwayland-dev libxkbcommon-dev
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      - name: Generate project (bash)
+        if: runner.os != 'Windows'
+        run: ./project_setup.sh ci_project
+
+      - name: Generate project (PowerShell)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./project_setup.ps1 ci_project
+
+      # The setup scripts fetch raylib-zig from GitHub; build against this checkout instead
+      - name: Use local raylib-zig
+        working-directory: ci_project
+        run: |
+          perl -0pi -e 's/\.raylib_zig = \.\{.*?\},/.raylib_zig = .{ .path = ".." },/s' build.zig.zon
+          grep -q '.raylib_zig = .{ .path = ".." }' build.zig.zon
+
+      - name: Verify project can build
+        if: matrix.target == 'native'
+        working-directory: ci_project
+        run: zig build
+
+      - name: Verify project can build for emscripten
+        if: matrix.target == 'emscripten'
+        working-directory: ci_project
+        run: zig build -Dtarget=wasm32-emscripten -Doptimize=ReleaseSmall

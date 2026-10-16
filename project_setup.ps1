@@ -14,6 +14,7 @@ Remove-Item "build.zig", "src\root.zig"
 
 $BUILD_DOT_ZIG = @"
 const std = @import("std");
+const builtin = @import("builtin");
 const rlz = @import("raylib_zig");
 
 pub fn build(b: *std.Build) !void {
@@ -45,6 +46,7 @@ pub fn build(b: *std.Build) !void {
         });
 
         const install_dir: std.Build.InstallDir = .{ .custom = "web" };
+        const html_filename = b.fmt("{s}.html", .{wasm.name});
         const emcc_flags = emsdk.emccDefaultFlags(b.allocator, .{
             .optimize = optimize,
         });
@@ -52,20 +54,27 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         });
 
-        const emcc_step = emsdk.emccStep(b, raylib_artifact, wasm, .{
+        const emcc_step = try emsdk.emccStep(b, &.{}, &.{ raylib_artifact, wasm }, .{
             .optimize = optimize,
             .flags = emcc_flags,
             .settings = emcc_settings,
-            .shell_file_path = emsdk.shell(raylib_dep),
+            .shell_file_path = raylib_dep.builder.dependency("raylib", .{}).path("src/shell.html"),
             .install_dir = install_dir,
-            .embed_paths = &.{.{ .src_path = "resources/" }},
+            .preload_paths = &.{.{ .src_path = b.path("resources"), .virtual_path = "resources" }},
+            .out_file_name = html_filename,
         });
+        // emcc.py can not be spawned directly on Windows, use emcc.bat instead
+        if (builtin.os.tag == .windows) {
+            for (emcc_step.dependencies.items) |dep| {
+                const run = dep.cast(std.Build.Step.Run) orelse continue;
+                run.argv.items[0].lazy_path.lazy_path = try emsdk.path(b, "upstream/emscripten/emcc.bat");
+            }
+        }
         b.getInstallStep().dependOn(emcc_step);
 
-        const html_filename = try std.fmt.allocPrint(b.allocator, "{s}.html", .{wasm.name});
-        const emrun_step = emsdk.emrunStep(
+        const emrun_step = try emsdk.emrunStep(
             b,
-            b.getInstallPath(install_dir, html_filename),
+            b.graph.path(.install_prefix, b.fmt("web/{s}", .{html_filename})),
             &.{},
         );
 
